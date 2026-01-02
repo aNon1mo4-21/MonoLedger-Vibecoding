@@ -1,0 +1,819 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MonoLedger💰</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <script src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"></script>
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;900&display=swap');
+        body { font-family: 'Inter', -apple-system, sans-serif; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        .recharts-responsive-container { min-height: 240px; }
+        .modal-overlay { background-color: rgba(0, 0, 0, 0.4); backdrop-filter: blur(4px); }
+        @keyframes rotate { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        .animate-sync { animation: rotate 1s linear infinite; }
+    </style>
+</head>
+<body class="bg-[#F8FAFC]">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        window.process = { env: { NODE_ENV: 'production' } };
+
+        const { useState, useEffect, useMemo } = React;
+        const { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, Legend, CartesianGrid } = window.Recharts || {};
+
+        // --- 配置常量 ---
+        const APP_ID = 'local-ledger-v3-final';
+        const INITIAL_CATEGORIES = ['餐饮', '交通', '购物', '生活费', '娱乐', '医疗', '工资', '转账', '其他'];
+        const CHART_COLORS = ['#2563eb', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
+        const INITIAL_ACCOUNTS = [
+            { id: 'acc_1', name: '现金', balance: 0 },
+            { id: 'acc_2', name: '支付宝', balance: 0 },
+            { id: 'acc_3', name: '微信支付', balance: 0 },
+            { id: 'acc_4', name: '银行卡', balance: 0 },
+        ];
+
+        // --- ！！！初始化配置：用户可在 UI 中修改，也可在此设置默认值 ！！！ ---
+        const DEFAULT_GIT_CONFIG = {
+            user: "",     // GitHub 用户名
+            repo: "",     // 仓库名
+            path: "data.json", // 数据保存的文件名
+            token: ""     // GitHub Personal Access Token
+        };
+
+        // --- GitHub 同步工具类 ---
+        const GitHubAPI = {
+            toBase64: (str) => btoa(unescape(encodeURIComponent(str))),
+            fromBase64: (str) => decodeURIComponent(escape(atob(str))),
+
+            async request(config, method = 'GET', body = null) {
+                const { user, repo, path, token } = config;
+                const url = `https://api.github.com/repos/${user}/${repo}/contents/${path}`;
+                const res = await fetch(url, {
+                    method,
+                    headers: {
+                        'Authorization': `token ${token}`,
+                        'Accept': 'application/vnd.github.v3+json',
+                    },
+                    body: body ? JSON.stringify(body) : null
+                });
+                if (!res.ok) {
+                    const error = await res.json();
+                    throw new Error(error.message || '网络请求失败');
+                }
+                return res.json();
+            }
+        };
+
+        // --- 图标组件 ---
+        const Icon = ({ name, size = 24, className = "" }) => {
+            const icons = {
+                Plus: <path d="M5 12h14m-7-7v14" />,
+                Wallet: <path d="M20 12V8H6a2 2 0 0 1-2-2c0-1.1.9-2 2-2h12v4m2 4h-7a2 2 0 0 0-2 2v2a2 2 0 0 0 2 2h7V12z" />,
+                MoneyBag: <path d="M12 2v4m-5 0h10M6 10a6 6 0 0 0 12 0v-1H6v1zm0 0v10a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V10M12 13v4m-2-2h4" />,
+                Notebook: <path d="M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zm4 4h8m-8 4h8m-8 4h4" />,
+                History: <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8m0-4v4h4" />,
+                Settings: (
+                    <React.Fragment>
+                        <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1-1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.1a2 2 0 0 1-1-1.72v-.51a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
+                        <circle cx="12" cy="12" r="3"/>
+                    </React.Fragment>
+                ),
+                TrendingDown: <path d="m22 16-6.5-6.5L11 14 2 5m20 11h-6v-6" />,
+                TrendingUp: <path d="m22 8-6.5 6.5L11 9 2 18m20-10h-6v6" />,
+                Trash: <path d="M3 6h18m-2 0v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6m3 0V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />,
+                Download: <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4m4-5 5 5 5-5m-5 5V3" />,
+                Upload: (
+                    <React.Fragment>
+                        <path d="M3 9v4a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9" />
+                        <path d="M17 6l-5-5-5 5" />
+                        <path d="M12 1v14" />
+                    </React.Fragment>
+                ),
+                Edit: <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />,
+                ArrowLeftRight: <path d="M8 7 3 12l5 5m8-10 5 5-5 5M3 12h18" />,
+                Calendar: <path d="M21 10H3M16 2v4M8 2v4m10 16H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2z" />,
+                Layers: <path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.27a1 1 0 0 0 0 1.83l8.57 4.09a2 2 0 0 0 1.66 0l8.57-4.09a1 1 0 0 0 0-1.83zM2 12l10 4.76L22 12M2 17l10 4.76L22 17" />,
+                Refresh: <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />,
+                Github: <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22" />,
+                ChevronDown: <path d="m6 9 6 6 6-6" />,
+                ChevronUp: <path d="m18 15-6-6-6 6" />,
+                Cloud: <path d="M17.5 19c3.037 0 5.5-2.463 5.5-5.5 0-2.799-2.095-5.11-4.832-5.457C17.156 5.14 14.816 3 12 3 9.488 3 7.33 4.764 6.702 7.118 4.04 7.57 2 9.852 2 12.5 2 15.537 4.463 18 7.5 18h10z" />,
+                Check: <path d="M20 6 9 17l-5-5" />,
+                X: <path d="M18 6 6 18M6 6l12 12" />
+            };
+
+            return (
+                <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+                    {icons[name] || <circle cx="12" cy="12" r="10" />}
+                </svg>
+            );
+        };
+
+            const App = () => {
+            const [accounts, setAccounts] = useState(() => JSON.parse(localStorage.getItem(`${APP_ID}_acc`) || JSON.stringify(INITIAL_ACCOUNTS)));
+            const [transactions, setTransactions] = useState(() => JSON.parse(localStorage.getItem(`${APP_ID}_tx`) || '[]'));
+            const [categories, setCategories] = useState(() => JSON.parse(localStorage.getItem(`${APP_ID}_cat`) || JSON.stringify(INITIAL_CATEGORIES)));
+            const [gitConfig, setGitConfig] = useState(() => {
+                const saved = localStorage.getItem(`${APP_ID}_git`);
+                return saved ? JSON.parse(saved) : DEFAULT_GIT_CONFIG;
+            });
+            const [isSyncing, setIsSyncing] = useState(false);
+            const [activeTab, setActiveTab] = useState('dashboard');
+            const [toast, setToast] = useState(null);
+            const [detailTx, setDetailTx] = useState(null); 
+
+            useEffect(() => { localStorage.setItem(`${APP_ID}_acc`, JSON.stringify(accounts)); }, [accounts]);
+            useEffect(() => { localStorage.setItem(`${APP_ID}_tx`, JSON.stringify(transactions)); }, [transactions]);
+            useEffect(() => { localStorage.setItem(`${APP_ID}_cat`, JSON.stringify(categories)); }, [categories]);
+            useEffect(() => { localStorage.setItem(`${APP_ID}_git`, JSON.stringify(gitConfig)); }, [gitConfig]);
+
+            const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2000); };
+            const formatCurrency = (val) => `¥${Number(val).toLocaleString(undefined, {minimumFractionDigits: 2})}`;
+            const totalAssets = useMemo(() => accounts.reduce((s, a) => s + (Number(a.balance) || 0), 0), [accounts]);
+
+            const handlePullAndMerge = async () => {
+                if (!gitConfig.user || !gitConfig.token || !gitConfig.repo) {
+                    return showToast("请在设置中完善同步配置");
+                }
+
+                setIsSyncing(true);
+                try {
+                    const cloudFile = await GitHubAPI.request(gitConfig);
+                    const cloudData = JSON.parse(GitHubAPI.fromBase64(cloudFile.content));
+
+                    const mergedTxsMap = new Map();
+                    (cloudData.transactions || []).forEach(t => mergedTxsMap.set(t.id, t));
+                    transactions.forEach(t => mergedTxsMap.set(t.id, t));
+                    const finalTxs = Array.from(mergedTxsMap.values()).sort((a, b) => (b.timestamp || b.id) - (a.timestamp || a.id));
+
+                    const localAccMap = new Map(accounts.map(a => [a.id, a]));
+                    (cloudData.accounts || []).forEach(a => { if (!localAccMap.has(a.id)) localAccMap.set(a.id, a); });
+                    const finalAccs = Array.from(localAccMap.values());
+
+                    const localCats = Array.from(new Set(categories));
+                    (cloudData.categories || []).forEach(c => { if (!localCats.includes(c)) localCats.push(c); });
+                    const finalCats = localCats;
+
+                    setTransactions(finalTxs);
+                    setAccounts(finalAccs);
+                    setCategories(finalCats);
+
+                    const payload = {
+                        message: `Auto merge sync from web app at ${new Date().toLocaleString()}`,
+                        content: GitHubAPI.toBase64(JSON.stringify({ transactions: finalTxs, accounts: finalAccs, categories: finalCats }, null, 2)),
+                        sha: cloudFile.sha
+                    };
+                    await GitHubAPI.request(gitConfig, 'PUT', payload);
+                    showToast("拉取并合并成功");
+                } catch (err) {
+                    console.error(err);
+                    showToast(`同步失败: ${err.message}`);
+                } finally {
+                    setIsSyncing(false);
+                }
+            };
+
+            const handleDownloadToLocal = async () => {
+                if (!gitConfig.user || !gitConfig.token || !gitConfig.repo) {
+                    return showToast("请在设置中完善同步配置");
+                }
+
+                if (!confirm("即将从云端下载并覆盖本地数据，确定继续吗？本地未保存的更改将丢失。")) return;
+                setIsSyncing(true);
+                try {
+                    const cloudFile = await GitHubAPI.request(gitConfig);
+                    const cloudData = JSON.parse(GitHubAPI.fromBase64(cloudFile.content));
+
+                    setTransactions(cloudData.transactions || []);
+                    setAccounts(cloudData.accounts || []);
+                    setCategories(cloudData.categories || []);
+
+                    showToast("已从云端下载并替换本地数据");
+                } catch (err) {
+                    console.error(err);
+                    showToast(`下载失败: ${err.message}`);
+                } finally {
+                    setIsSyncing(false);
+                }
+            };
+
+            const handleForcePush = async () => {
+                if (!gitConfig.user || !gitConfig.token || !gitConfig.repo) {
+                    return showToast("请在设置中完善同步配置");
+                }
+                if (!confirm("即将把本地数据写入云端并覆盖远端文件，确定继续吗？")) return;
+
+                setIsSyncing(true);
+                try {
+                    const cloudFile = await GitHubAPI.request(gitConfig);
+                    const payload = {
+                        message: `Force overwrite from web app at ${new Date().toLocaleString()}`,
+                        content: GitHubAPI.toBase64(JSON.stringify({ transactions, accounts, categories }, null, 2)),
+                        sha: cloudFile.sha
+                    };
+                    await GitHubAPI.request(gitConfig, 'PUT', payload);
+                    showToast("已覆盖写入云端");
+                } catch (err) {
+                    console.error(err);
+                    showToast(`覆盖失败: ${err.message}`);
+                } finally {
+                    setIsSyncing(false);
+                }
+            };
+
+            const handleAddTx = (tx) => {
+                const amt = Math.round(Number(tx.amount) * 100) / 100;
+                const newAccounts = accounts.map(acc => {
+                    const bal = Number(acc.balance) || 0;
+                    if (tx.type === 'transfer') {
+                        if (acc.id === tx.fromAccount) return { ...acc, balance: Math.round((bal - amt) * 100) / 100 };
+                        if (acc.id === tx.toAccount) return { ...acc, balance: Math.round((bal + amt) * 100) / 100 };
+                    } else if (acc.id === tx.accountId) {
+                        const delta = amt * (tx.type === 'expense' ? -1 : 1);
+                        return { ...acc, balance: Math.round((bal + delta) * 100) / 100 };
+                    }
+                    return acc;
+                });
+                setAccounts(newAccounts);
+                setTransactions([{ ...tx, amount: amt, id: Date.now(), timestamp: Date.now(), date: tx.date || new Date().toISOString().split('T')[0] }, ...transactions]);
+                showToast("入账成功");
+            };
+
+            const handleDeleteTx = (id) => {
+                if(!confirm("确定删除吗？")) return;
+                setTransactions(transactions.filter(t => t.id !== id));
+                setDetailTx(null);
+                showToast("已删除");
+            };
+
+            const handleUpdateTxRemark = (id, newRemark) => {
+                setTransactions(transactions.map(t => t.id === id ? { ...t, remark: newRemark } : t));
+                if (detailTx && detailTx.id === id) setDetailTx({ ...detailTx, remark: newRemark });
+                showToast("备注已保存");
+            };
+
+            const TransactionDetailModal = ({ t, onClose, onDelete, onUpdateRemark, accounts }) => {
+                const [isEditing, setIsEditing] = useState(false);
+                const [editedRemark, setEditedRemark] = useState("");
+                useEffect(() => { if (t) { setEditedRemark(t.remark || ""); setIsEditing(false); } }, [t]);
+                if (!t) return null;
+                const acc = accounts.find(a => a.id === t.accountId);
+                const fromAcc = accounts.find(a => a.id === t.fromAccount);
+                const toAcc = accounts.find(a => a.id === t.toAccount);
+
+                return (
+                    <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 modal-overlay" onClick={onClose}>
+                        <div className="bg-white w-full max-w-sm rounded-[40px] shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200" onClick={(e) => e.stopPropagation()}>
+                            <div className={`p-8 text-center ${t.type === 'expense' ? 'bg-red-50' : (t.type === 'income' ? 'bg-green-50' : 'bg-blue-50')}`}>
+                                <p className="text-xs font-black text-gray-400 uppercase tracking-widest mb-2">{t.type === 'expense' ? '支出详情' : (t.type === 'income' ? '收入详情' : '转账详情')}</p>
+                                <h2 className={`text-4xl font-black ${t.type === 'expense' ? 'text-red-500' : (t.type === 'income' ? 'text-green-600' : 'text-blue-600')}`}>{t.type === 'expense' ? '-' : (t.type === 'income' ? '+' : '')}{formatCurrency(t.amount)}</h2>
+                            </div>
+                            <div className="p-8 space-y-6">
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div><p className="text-[10px] font-black text-gray-300 uppercase mb-1">日期</p><p className="text-sm font-bold text-gray-700">{t.date}</p></div>
+                                    <div><p className="text-[10px] font-black text-gray-300 uppercase mb-1">分类</p><p className="text-sm font-bold text-gray-700">{t.type === 'transfer' ? '账户互转' : t.category}</p></div>
+                                    <div className="col-span-2"><p className="text-[10px] font-black text-gray-300 uppercase mb-1">关联账户</p><p className="text-sm font-bold text-gray-700">{t.type === 'transfer' ? `${fromAcc?.name || '未知'} → ${toAcc?.name || '未知'}` : (acc?.name || '未知账户')}</p></div>
+                                </div>
+                                <div className="pt-4 border-t border-gray-50">
+                                    <div className="flex justify-between items-center mb-2"><p className="text-[10px] font-black text-gray-300 uppercase">账单备注</p>{!isEditing && <button onClick={() => setIsEditing(true)} className="text-blue-500 hover:text-blue-600 flex items-center gap-1"><Icon name="Edit" size={12} /><span className="text-[10px] font-black uppercase">编辑</span></button>}</div>
+                                    {isEditing ? (
+                                        <div className="space-y-3">
+                                            <textarea autoFocus className="w-full bg-gray-50 p-4 rounded-2xl min-h-[80px] text-sm font-medium text-gray-600 outline-none border border-blue-100" value={editedRemark} onChange={(e) => setEditedRemark(e.target.value)} placeholder="在此输入备注内容..." />
+                                            <div className="flex gap-2"><button onClick={() => setIsEditing(false)} className="flex-1 bg-gray-100 text-gray-400 py-2 rounded-xl text-xs font-black">取消</button><button onClick={() => { onUpdateRemark(t.id, editedRemark); setIsEditing(false); }} className="flex-1 bg-blue-600 text-white py-2 rounded-xl text-xs font-black">保存</button></div>
+                                        </div>
+                                    ) : (
+                                        <div className="bg-gray-50 p-4 rounded-2xl min-h-[80px] cursor-pointer group hover:bg-gray-100 transition-colors" onClick={() => setIsEditing(true)}>
+                                            <p className="text-sm font-medium text-gray-600 leading-relaxed italic">{t.remark ? t.remark : "点击添加备注信息..."}</p>
+                                        </div>
+                                    )}
+                                </div>
+                                <div className="flex gap-3 pt-4"><button onClick={onClose} className="flex-1 bg-gray-100 text-gray-500 py-4 rounded-2xl font-black text-sm active:scale-95 transition-transform">关闭</button><button onClick={() => onDelete(t.id)} className="w-14 bg-red-50 text-red-400 flex items-center justify-center rounded-2xl active:scale-95 transition-transform"><Icon name="Trash" size={20} /></button></div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            const Dashboard = () => {
+                const [analysisMode, setAnalysisMode] = useState('expense');
+                const [timeRange, setTimeRange] = useState('all');
+                const availableMonths = useMemo(() => {
+                    const months = [...new Set(transactions.map(t => t.date.slice(0, 7)))];
+                    return months.sort((a, b) => b.localeCompare(a));
+                }, [transactions]);
+                const filteredTransactions = useMemo(() => timeRange === 'all' ? transactions : transactions.filter(t => t.date.startsWith(timeRange)), [transactions, timeRange]);
+                
+                const pieChartData = useMemo(() => {
+                    if (analysisMode === 'summary') return [];
+                    const map = {};
+                    const targetTxs = filteredTransactions.filter(t => t.type === analysisMode);
+                    targetTxs.forEach(t => map[t.category] = (map[t.category] || 0) + Number(t.amount));
+                    
+                    const data = Object.entries(map).map(([name, value]) => ({ name, value }));
+                    return data.sort((a, b) => b.value - a.value);
+                }, [filteredTransactions, analysisMode]);
+
+                const pieTotal = useMemo(() => pieChartData.reduce((s, item) => s + item.value, 0), [pieChartData]);
+
+                const barChartData = useMemo(() => {
+                    const income = filteredTransactions.filter(t => t.type === 'income').reduce((s, t) => s + Number(t.amount), 0);
+                    const expense = filteredTransactions.filter(t => t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0);
+                    return [
+                        { name: '总收入', value: income, color: '#10b981' },
+                        { name: '总支出', value: expense, color: '#ef4444' }
+                    ];
+                }, [filteredTransactions]);
+
+                return (
+                    <div className="space-y-6 pb-40">
+                        <div className="bg-blue-600 text-white p-6 rounded-[32px] shadow-xl relative overflow-hidden">
+                            <div className="relative z-10">
+                                <p className="text-blue-100 text-xs font-bold uppercase tracking-wider">总资产余额</p>
+                                <h1 className="text-4xl font-black mt-2 tracking-tighter">{formatCurrency(totalAssets)}</h1>
+                                <div className="mt-8 flex gap-4">
+                                    <div className="flex-1 bg-white/10 p-3 rounded-2xl backdrop-blur-md">
+                                        <p className="text-[10px] text-blue-100">本月支出</p>
+                                        <p className="text-sm font-bold mt-1">
+                                            {formatCurrency(transactions.filter(t => t.type === 'expense' && t.date.startsWith(new Date().toISOString().slice(0, 7))).reduce((s, t) => s + Number(t.amount), 0))}
+                                        </p>
+                                    </div>
+                                    <div className="flex-1 bg-white/10 p-3 rounded-2xl backdrop-blur-md">
+                                        <p className="text-[10px] text-blue-100">本月收入</p>
+                                        <p className="text-sm font-bold mt-1">
+                                            {formatCurrency(transactions.filter(t => t.type === 'income' && t.date.startsWith(new Date().toISOString().slice(0, 7))).reduce((s, t) => s + Number(t.amount), 0))}
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div className="space-y-3">
+                            <h3 className="font-black text-gray-800 text-sm uppercase tracking-widest px-1">账户明细</h3>
+                            <div className="flex gap-4 overflow-x-auto no-scrollbar pb-2">
+                                {accounts.map(acc => (
+                                    <div key={acc.id} className="min-w-[150px] bg-white p-4 rounded-[24px] shadow-sm border border-gray-100"><p className="text-[10px] font-bold text-gray-400 mb-2">{acc.name}</p><p className="text-lg font-black text-gray-800">{formatCurrency(acc.balance)}</p></div>
+                                ))}
+                            </div>
+                        </div>
+                        <div className="bg-white p-6 rounded-[32px] shadow-sm space-y-6">
+                            <div className="space-y-4">
+                                <div className="flex items-center justify-between px-1">
+                                    <h3 className="font-black text-gray-800 text-sm uppercase tracking-widest">数据分析</h3>
+                                    <div className="flex items-center gap-2 bg-gray-50 px-3 py-1.5 rounded-xl border border-gray-100">
+                                        <Icon name="Calendar" size={14} className="text-gray-400" /><select value={timeRange} onChange={(e) => setTimeRange(e.target.value)} className="bg-transparent text-[11px] font-black text-gray-600 outline-none appearance-none cursor-pointer"><option value="all">全部时间</option>{availableMonths.map(m => <option key={m} value={m}>{m}</option>)}</select>
+                                    </div>
+                                </div>
+                                <div className="flex bg-gray-100 p-1 rounded-xl">
+                                    {['expense', 'income', 'summary'].map(mode => (
+                                        <button key={mode} onClick={() => setAnalysisMode(mode)} className={`flex-1 py-1.5 rounded-lg text-[10px] font-black transition-all ${analysisMode === mode ? 'bg-white shadow-sm text-blue-600' : 'text-gray-400'}`}>
+                                            {mode === 'expense' ? '支出' : (mode === 'income' ? '收入' : '收支')}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                            <div className="w-full flex flex-col items-center">
+                                <div className="h-60 w-full flex items-center justify-center">
+                                    {analysisMode === 'summary' ? (
+                                        <ResponsiveContainer width="100%" height="100%">
+                                            <BarChart data={barChartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                                                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 10, fontWeight: 'black', fill: '#94a3b8' }} />
+                                                <Tooltip cursor={{ fill: 'rgba(0,0,0,0.02)' }} contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} formatter={(v) => formatCurrency(v)} />
+                                                <Bar dataKey="value" radius={[8, 8, 0, 0]} barSize={50}>
+                                                    {barChartData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.color} />)}
+                                                </Bar>
+                                            </BarChart>
+                                        </ResponsiveContainer>
+                                    ) : (
+                                        pieChartData.length > 0 ? (
+                                            <ResponsiveContainer width="100%" height="100%">
+                                                <PieChart>
+                                                    <Pie data={pieChartData} innerRadius={60} outerRadius={85} dataKey="value" stroke="none" paddingAngle={5}>
+                                                        {pieChartData.map((_, i) => (
+                                                            <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                                                        ))}
+                                                    </Pie>
+                                                    <Tooltip contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} formatter={(v) => formatCurrency(v)} />
+                                                </PieChart>
+                                            </ResponsiveContainer>
+                                        ) : (
+                                            <div className="text-center py-10"><p className="text-xs font-black text-gray-300 uppercase tracking-widest">暂无数据</p></div>
+                                        )
+                                    )}
+                                </div>
+                                
+                                {analysisMode !== 'summary' && pieChartData.length > 0 && (
+                                    <div className="w-full mt-6 space-y-2">
+                                        <div className="px-2 pb-2 border-b border-gray-50 flex justify-between">
+                                            <span className="text-[10px] font-black text-gray-300 uppercase">分类明细</span>
+                                            <span className="text-[10px] font-black text-gray-300 uppercase">占比</span>
+                                        </div>
+                                        {pieChartData.map((item, i) => (
+                                            <div key={item.name} className="flex items-center justify-between p-3 bg-gray-50/50 rounded-2xl hover:bg-gray-50 transition-colors">
+                                                <div className="flex items-center gap-3">
+                                                    <div className="w-2.5 h-2.5 rounded-full shadow-sm" style={{ backgroundColor: CHART_COLORS[i % CHART_COLORS.length] }}></div>
+                                                    <span className="text-xs font-black text-gray-700">{item.name}</span>
+                                                </div>
+                                                <div className="text-right">
+                                                    <span className="text-xs font-black text-gray-800 mr-4">{formatCurrency(item.value)}</span>
+                                                    <span className="text-[10px] font-black text-blue-600 bg-blue-50 px-2 py-0.5 rounded-lg">
+                                                        {((item.value / pieTotal) * 100).toFixed(1)}%
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            const HistoryView = () => {
+                const [historyMode, setHistoryMode] = useState('timeline');
+
+                const groupedItems = useMemo(() => {
+                    const groups = {};
+                    transactions.forEach(t => {
+                        let key = t.date;
+                        if (historyMode === 'category') {
+                            key = t.type === 'transfer' ? '账户互转' : t.category;
+                        } else if (historyMode === 'account') {
+                            if (t.type === 'transfer') {
+                                const from = accounts.find(a => a.id === t.fromAccount)?.name || '未知';
+                                key = from;
+                            } else {
+                                key = accounts.find(a => a.id === t.accountId)?.name || '未知账户';
+                            }
+                        }
+                        
+                        if (!groups[key]) groups[key] = [];
+                        groups[key].push(t);
+                    });
+                    
+                    const entries = Object.entries(groups);
+                    if (historyMode === 'timeline') {
+                        return entries.sort((a, b) => b[0].localeCompare(a[0]));
+                    }
+                    return entries.sort((a, b) => a[0].localeCompare(b[0]));
+                }, [transactions, historyMode, accounts]);
+
+                return (
+                    <div className="space-y-6 pb-40">
+                        <div className="bg-white p-1.5 rounded-2xl flex shadow-sm border border-gray-100">
+                            {[
+                                { id: 'timeline', name: '时序' },
+                                { id: 'category', name: '按分类' },
+                                { id: 'account', name: '按账户' }
+                            ].map(mode => (
+                                <button key={mode.id} onClick={() => setHistoryMode(mode.id)} className={`flex-1 py-2 text-[10px] font-black uppercase transition-all rounded-xl ${historyMode === mode.id ? 'bg-blue-600 text-white shadow-md' : 'text-gray-400'}`}>
+                                    {mode.name}
+                                </button>
+                            ))}
+                        </div>
+
+                        {transactions.length > 0 ? groupedItems.map(([label, items]) => (
+                            <div key={label} className="space-y-2">
+                                <div className="px-2 flex justify-between items-center"><span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">{label}</span><span className="text-[10px] font-bold text-gray-300 italic">{items.length} 笔</span></div>
+                                <div className="bg-white rounded-[32px] overflow-hidden shadow-sm border border-gray-100">
+                                    {items.map((t, idx) => (
+                                        <div key={t.id} className={`p-4 flex items-center gap-4 active:bg-gray-50 transition-colors cursor-pointer ${idx !== items.length - 1 ? 'border-b border-gray-50' : ''}`} onClick={() => setDetailTx(t)}>
+                                            <div className={`p-2 rounded-xl ${t.type === 'expense' ? 'bg-red-50 text-red-500' : (t.type === 'income' ? 'bg-green-50 text-green-500' : 'bg-blue-50 text-blue-500')}`}><Icon name={t.type === 'expense' ? "TrendingDown" : (t.type === 'income' ? "TrendingUp" : "ArrowLeftRight")} size={18} /></div>
+                                            <div className="flex-1 min-w-0"><p className="text-sm font-black text-gray-800 truncate">{t.type === 'transfer' ? '账户互转' : (t.vendor || t.category)}</p><p className="text-[10px] text-gray-400 font-bold">{historyMode === 'account' ? t.date : (t.type === 'transfer' ? `${accounts.find(a=>a.id===t.fromAccount)?.name} → ${accounts.find(a=>a.id===t.toAccount)?.name}` : accounts.find(a=>a.id===t.accountId)?.name)}</p></div>
+                                            <div className="text-right flex items-center gap-2"><div><p className={`font-black ${t.type === 'expense' ? 'text-gray-800' : (t.type === 'income' ? 'text-green-500' : 'text-blue-600')}`}>{t.type === 'expense' ? '-' : (t.type === 'income' ? '+' : '')}{`¥${Number(t.amount).toLocaleString(undefined, {minimumFractionDigits: 2})}`}</p></div>{t.remark && <div className="w-1.5 h-1.5 rounded-full bg-blue-400"></div>}</div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )) : <div className="text-center py-20 text-gray-300 font-black uppercase text-xs">尚无记录</div>}
+                    </div>
+                );
+            };
+
+            const SyncView = ({ gitConfig, setGitConfig, handleDownloadToLocal, handleForcePush, isSyncing }) => {
+                const [showConfig, setShowConfig] = useState(false);
+                return (
+                    <div className="space-y-6 pb-40">
+                        <div className="bg-white p-6 rounded-[32px] shadow-sm border-2 border-blue-50 space-y-6">
+                            <div className="text-center space-y-2">
+                                <div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mx-auto">
+                                    <Icon name="Cloud" size={32} className="text-blue-600" />
+                                </div>
+                                <h3 className="font-black text-gray-800 text-lg">GitHub 云同步</h3>
+                                <p className="text-xs text-gray-400 font-medium">随时随地通过 GitHub 仓库备份和同步您的账单数据</p>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-3">
+                                <button onClick={handleDownloadToLocal} disabled={isSyncing} className="w-full bg-blue-600 text-white py-4 rounded-3xl font-black text-sm flex items-center justify-center gap-2 active:scale-95 transition-all shadow-xl shadow-blue-100 disabled:opacity-50">
+                                    <Icon name="Download" size={18} className={isSyncing ? "animate-sync" : ""} />
+                                    下载并覆盖本地
+                                </button>
+                                <button onClick={handleForcePush} disabled={isSyncing} className="w-full bg-red-500 text-white py-4 rounded-3xl font-black text-sm flex items-center justify-center gap-2 active:scale-95 transition-all shadow-xl shadow-red-200 disabled:opacity-50">
+                                    <Icon name="Upload" size={18} className="" />
+                                    覆盖写入
+                                </button>
+                            </div>
+
+                            <div className="pt-4 border-t border-gray-50 space-y-4">
+                                <button onClick={() => setShowConfig(!showConfig)} className="w-full flex items-center justify-between text-gray-500 hover:text-blue-600 transition-colors px-2">
+                                    <div className="flex items-center gap-2"><Icon name="Settings" size={16} /><span className="text-xs font-black uppercase">同步参数配置</span></div>
+                                    <Icon name={showConfig ? "ChevronUp" : "ChevronDown"} size={16} />
+                                </button>
+
+                                {showConfig && (
+                                    <div className="space-y-4 animate-in slide-in-from-top-2 duration-200">
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <div className="space-y-1"><label className="text-[10px] font-black text-gray-400 uppercase ml-1">用户名</label><input type="text" className="w-full bg-gray-50 p-3 rounded-2xl text-xs font-bold outline-none border border-transparent focus:border-blue-100" placeholder="GitHub User" value={gitConfig.user} onChange={e=>setGitConfig({...gitConfig, user: e.target.value})} /></div>
+                                            <div className="space-y-1"><label className="text-[10px] font-black text-gray-400 uppercase ml-1">仓库名</label><input type="text" className="w-full bg-gray-50 p-3 rounded-2xl text-xs font-bold outline-none border border-transparent focus:border-blue-100" placeholder="Repo Name" value={gitConfig.repo} onChange={e=>setGitConfig({...gitConfig, repo: e.target.value})} /></div>
+                                        </div>
+                                        <div className="space-y-1"><label className="text-[10px] font-black text-gray-400 uppercase ml-1">文件路径</label><input type="text" className="w-full bg-gray-50 p-3 rounded-2xl text-xs font-bold outline-none border border-transparent focus:border-blue-100" placeholder="data.json" value={gitConfig.path} onChange={e=>setGitConfig({...gitConfig, path: e.target.value})} /></div>
+                                        <div className="space-y-1"><label className="text-[10px] font-black text-gray-400 uppercase ml-1">令牌 (Token)</label><input type="password" className="w-full bg-gray-50 p-3 rounded-2xl text-xs font-bold outline-none border border-transparent focus:border-blue-100" placeholder="ghp_xxxx" value={gitConfig.token} onChange={e=>setGitConfig({...gitConfig, token: e.target.value})} /></div>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            const SettingsView = ({ accounts, setAccounts, transactions }) => {
+                const [showManage, setShowManage] = useState(false);
+                const [newAccountName, setNewAccountName] = useState("");
+                const [newAccountBalance, setNewAccountBalance] = useState("");
+                const [editingNameId, setEditingNameId] = useState(null);
+                const [editingNameValue, setEditingNameValue] = useState("");
+
+                const exportCSV = () => {
+                    const headers = "日期,类型,金额,分类,账户,备注,转出账户,转入账户";
+                    const rows = transactions.map(t => {
+                        const typeMap = { 'expense': '支出', 'income': '收入', 'transfer': '转账' };
+                        const getAccName = (id) => accounts.find(a => a.id === id)?.name || '';
+                        return [t.date, typeMap[t.type], t.amount, t.type==='transfer'?'转账':t.category, t.type!=='transfer'?getAccName(t.accountId):'', t.remark||'', t.type==='transfer'?getAccName(t.fromAccount):'', t.type==='transfer'?getAccName(t.toAccount):''].join(',');
+                    }).join('\n');
+                    const blob = new Blob(["\uFEFF"+headers+'\n'+rows], {type: 'text/csv'});
+                    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download=`ledger_${new Date().toISOString().slice(0,10)}.csv`; a.click();
+                };
+
+                const addAccount = () => {
+                    const name = newAccountName.trim();
+                    if (!name) return;
+                    const id = 'acc_' + Date.now();
+                    const balance = parseFloat(newAccountBalance) || 0;
+                    setAccounts(prev => [...prev, { id, name, balance }]);
+                    setNewAccountName(""); setNewAccountBalance("");
+                };
+
+                const deleteAccount = (id) => {
+                    if (!confirm("确定删除该账户？此操作会移除余额但不会修改历史记录中的账户引用。")) return;
+                    setAccounts(prev => prev.filter(a => a.id !== id));
+                };
+
+                const startRename = (acc) => { setEditingNameId(acc.id); setEditingNameValue(acc.name); };
+                const confirmRename = (id) => { const name = editingNameValue.trim(); if (!name) return; setAccounts(prev => prev.map(a => a.id === id ? {...a, name} : a)); setEditingNameId(null); setEditingNameValue(""); };
+
+                return (
+                    <div className="space-y-6 pb-40">
+                        <div className="bg-white p-6 rounded-[32px] shadow-sm space-y-4">
+                            <div className="flex items-center justify-between">
+                                <h3 className="font-black text-gray-800 text-sm uppercase tracking-widest px-1">账户余额初始化</h3>
+                                <button onClick={() => setShowManage(true)} className="text-xs font-black bg-blue-50 text-blue-600 px-3 py-2 rounded-xl">管理账户</button>
+                            </div>
+                            <div className="space-y-3">{accounts.map(acc => (
+                                <div key={acc.id} className="flex items-center justify-between gap-4 p-2 bg-gray-50 rounded-2xl">
+                                    <span className="text-xs font-black text-gray-500 uppercase ml-2">{acc.name}</span>
+                                    <div className="relative flex-1 max-w-[140px]"><span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-black text-blue-300">¥</span>
+                                        <input type="text" inputMode="decimal" className="w-full bg-white p-2 pl-7 pr-3 rounded-xl text-sm font-black outline-none border border-transparent focus:border-blue-100 text-right" value={acc.balance} onChange={(e)=>setAccounts(prev=>prev.map(a=>a.id===acc.id?{...a, balance:e.target.value}:a))} />
+                                    </div>
+                                </div>
+                            ))}</div>
+                        </div>
+                        <div className="space-y-4">
+                            <button onClick={exportCSV} className="w-full bg-white p-5 rounded-3xl font-black text-sm shadow-sm flex items-center justify-between group active:bg-gray-50">导出 CSV 数据报表 <Icon name="Download" size={18} className="text-gray-300 group-hover:text-blue-500" /></button>
+                            <button onClick={()=>{if(confirm("确定彻底清空本地所有账单和配置吗？此操作不可撤销。")){localStorage.clear();location.reload();}}} className="w-full bg-red-50 p-5 rounded-3xl font-black text-sm text-red-500 flex items-center justify-between group">清空所有本地数据 <Icon name="Trash" size={18} className="text-red-200 group-hover:text-red-500" /></button>
+                        </div>
+
+                        {showManage && (
+                            <div className="fixed inset-0 z-[110] flex items-center justify-center p-6 modal-overlay" onClick={() => setShowManage(false)}>
+                                <div className="bg-white w-full max-w-md rounded-[24px] shadow-2xl p-6 space-y-4" onClick={e => e.stopPropagation()}>
+                                    <div className="flex items-center justify-between"><h3 className="font-black text-gray-800 text-sm uppercase tracking-widest">管理账户</h3><button onClick={() => setShowManage(false)} className="p-2 bg-gray-50 rounded-full text-gray-400"><Icon name="X" size={16}/></button></div>
+                                    <div className="max-h-64 overflow-y-auto space-y-2 pr-1 no-scrollbar">
+                                        {accounts.map(acc => (
+                                            <div key={acc.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-2xl">
+                                                <div className="flex-1 min-w-0">
+                                                    {editingNameId === acc.id ? (
+                                                        <input autoFocus className="w-full bg-white p-2 rounded-lg text-sm font-bold outline-none" value={editingNameValue} onChange={e => setEditingNameValue(e.target.value)} onBlur={() => confirmRename(acc.id)} onKeyDown={e => e.key==='Enter' && confirmRename(acc.id)} />
+                                                    ) : (
+                                                        <div className="flex items-center justify-between">
+                                                            <span className="text-sm font-black text-gray-700 truncate">{acc.name}</span>
+                                                            <span className="text-xs font-bold text-gray-400">¥{Number(acc.balance).toLocaleString(undefined, {minimumFractionDigits:2})}</span>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                                <div className="flex items-center gap-2 ml-3">
+                                                    <button onClick={() => startRename(acc)} className="p-2 text-blue-400 hover:text-blue-600"><Icon name="Edit" size={16} /></button>
+                                                    <button onClick={() => deleteAccount(acc.id)} className="p-2 text-red-200 hover:text-red-500"><Icon name="Trash" size={16} /></button>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <div className="pt-4 border-t border-gray-100 space-y-3">
+                                        <p className="text-[10px] font-black text-gray-400 uppercase ml-1">新增账户</p>
+                                        <div className="grid grid-cols-3 gap-2">
+                                            <input type="text" className="col-span-2 bg-gray-50 p-3 rounded-2xl text-xs font-bold outline-none" placeholder="账户名称（例如：工商银行卡）" value={newAccountName} onChange={e=>setNewAccountName(e.target.value)} />
+                                            <input type="number" step="0.01" className="bg-gray-50 p-3 rounded-2xl text-xs font-bold outline-none" placeholder="余额" value={newAccountBalance} onChange={e=>setNewAccountBalance(e.target.value)} />
+                                        </div>
+                                        <div className="flex gap-2">
+                                            <button onClick={addAccount} className="flex-1 bg-blue-600 text-white p-3 rounded-2xl font-black">添加账户</button>
+                                            <button onClick={() => { setNewAccountName(''); setNewAccountBalance(''); }} className="bg-gray-100 text-gray-500 p-3 rounded-2xl font-black">清空</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                );
+            };
+
+            const TransactionView = ({ handleAddTx, accounts, categories, setCategories }) => {
+                const [form, setForm] = useState({ type: 'expense', amount: '', category: categories[0], accountId: accounts[0]?.id, fromAccount: accounts[0]?.id, toAccount: accounts[1]?.id || accounts[0]?.id, date: new Date().toISOString().split('T')[0], remark: '' });
+                const [isManagingCategories, setIsManagingCategories] = useState(false);
+                const [newCategoryName, setNewCategoryName] = useState("");
+                const [latestTotal, setLatestTotal] = useState("");
+
+                const confirmAddCategory = () => {
+                    const name = newCategoryName.trim();
+                    if (!name) return;
+                    if (categories.includes(name)) {
+                        setForm({ ...form, category: name });
+                        setNewCategoryName("");
+                        return;
+                    }
+                    const updatedCategories = [...categories, name];
+                    setCategories(updatedCategories);
+                    setForm({ ...form, category: name });
+                    setNewCategoryName("");
+                };
+
+                const deleteCategory = (catName) => {
+                    if (catName === '其他' || catName === '转账') return;
+                    if (confirm(`确定删除分类“${catName}”吗？这将不会删除已存账单，但在后续记录时不可选。`)) {
+                        const updated = categories.filter(c => c !== catName);
+                        setCategories(updated);
+                        if (form.category === catName) setForm({...form, category: updated[0] || '其他'});
+                    }
+                };
+
+                useEffect(() => {
+                    if (form.category !== '小收益') return;
+                    const acc = accounts.find(a => a.id === form.accountId);
+                    const current = Number(acc?.balance) || 0;
+                    const latest = Number(latestTotal);
+                    if (isNaN(latest)) return;
+                    let diff = latest - current;
+                    diff = Math.round(diff * 100) / 100;
+                    if (diff > 0) {
+                        setForm(prev => ({ ...prev, amount: (diff).toFixed(2), type: 'income' }));
+                    } else if (diff < 0) {
+                        setForm(prev => ({ ...prev, amount: (Math.abs(diff)).toFixed(2), type: 'expense' }));
+                    } else {
+                        setForm(prev => ({ ...prev, amount: '', type: 'income' }));
+                    }
+                }, [latestTotal, form.accountId, form.category, accounts]);
+
+                return (
+                    <div className="space-y-6 pb-40">
+                        <div className="bg-white p-6 rounded-[32px] shadow-sm">
+                            <div className="flex p-1 bg-gray-50 rounded-2xl">{['expense', 'income', 'transfer'].map(t => <button key={t} onClick={() => setForm({...form, type: t})} className={`flex-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${form.type === t ? 'bg-blue-600 text-white shadow-md' : 'text-gray-400'}`}>{t === 'expense' ? '支出' : (t === 'income' ? '收入' : '转账')}</button>)}</div>
+                            <div className="space-y-1"><label className="text-[10px] font-black text-gray-400 uppercase px-1">金额</label><input type="number" className="w-full bg-gray-50 p-4 rounded-2xl text-2xl font-black outline-none focus:border-blue-100 border border-transparent" placeholder="0.00" value={form.amount} onChange={e=>setForm({...form, amount: e.target.value})} /></div>
+                            
+                            {form.type === 'transfer' ? (
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="space-y-1"><label className="text-[10px] font-black text-gray-400 uppercase px-1">转出</label><select className="w-full bg-gray-50 p-3 rounded-xl text-xs font-bold outline-none" value={form.fromAccount} onChange={e=>setForm({...form, fromAccount: e.target.value})}>{accounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select></div>
+                                    <div className="space-y-1"><label className="text-[10px] font-black text-gray-400 uppercase px-1">转入</label><select className="w-full bg-gray-50 p-3 rounded-xl text-xs font-bold outline-none" value={form.toAccount} onChange={e=>setForm({...form, toAccount: e.target.value})}>{accounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select></div>
+                                </div>
+                            ) : (
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="space-y-1"><label className="text-[10px] font-black text-gray-400 uppercase px-1">账户</label><select className="w-full bg-gray-50 p-3 rounded-xl text-xs font-bold outline-none" value={form.accountId} onChange={e=>setForm({...form, accountId: e.target.value})}>{accounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select></div>
+                                    <div className="space-y-1"><label className="text-[10px] font-black text-gray-400 uppercase px-1">分类</label>
+                                        <select 
+                                            className="w-full bg-gray-50 p-3 rounded-xl text-xs font-bold outline-none" 
+                                            value={form.category} 
+                                            onChange={e => e.target.value === "MANAGE_CATS" ? setIsManagingCategories(true) : setForm({...form, category: e.target.value})}
+                                        >
+                                            {categories.map(c=><option key={c} value={c}>{c}</option>)}
+                                            <option value="MANAGE_CATS" className="text-blue-500 font-black">⚙️ 管理分类...</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            )}
+                            {form.category === '小收益' && (
+                                <div className="space-y-1 mt-3">
+                                    <label className="text-[10px] font-black text-gray-400 uppercase px-1">最新数目</label>
+                                    <div className="flex gap-2 items-center">
+                                        <input type="text" inputMode="decimal" className="flex-1 bg-gray-50 p-3 rounded-2xl text-sm font-bold outline-none" placeholder="输入最新账户总额（¥）" value={latestTotal} onChange={e=>setLatestTotal(e.target.value)} />
+                                        <div className="text-xs font-black text-gray-500">当前余额: {formatCurrency(Number(accounts.find(a=>a.id===form.accountId)?.balance) || 0)}</div>
+                                    </div>
+                                    <div className="text-[12px] text-gray-600 mt-1">检测到增加：{form.amount ? formatCurrency(form.amount) : '—'}</div>
+                                </div>
+                            )}
+                            <div className="space-y-1"><label className="text-[10px] font-black text-gray-400 uppercase px-1">备注/商户</label><input type="text" className="w-full bg-gray-50 p-3 rounded-xl text-xs font-bold outline-none" placeholder="点击输入..." value={form.remark} onChange={e=>setForm({...form, remark: e.target.value})} /></div>
+                            <div className="space-y-1"><label className="text-[10px] font-black text-gray-400 uppercase px-1">日期</label><input type="date" className="w-full bg-gray-50 p-3 rounded-xl text-xs font-bold outline-none" value={form.date} onChange={e=>setForm({...form, date: e.target.value})} /></div>
+                            <button onClick={()=>{ if(!form.amount) return; handleAddTx(form); setForm({...form, amount: '', remark: ''}); }} className="w-full bg-blue-600 text-white py-4 rounded-2xl font-black shadow-lg shadow-blue-100 active:scale-95 transition-transform">确认入账</button>
+                        </div>
+
+                        {isManagingCategories && (
+                            <div className="fixed inset-0 z-[110] flex items-center justify-center p-6 modal-overlay" onClick={() => setIsManagingCategories(false)}>
+                                <div className="bg-white w-full max-w-sm rounded-[40px] shadow-2xl p-8 space-y-6 animate-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
+                                    <div className="flex justify-between items-center"><h3 className="font-black text-gray-800 text-sm uppercase tracking-widest">分类管理</h3><button onClick={() => setIsManagingCategories(false)} className="p-2 bg-gray-50 rounded-full text-gray-400"><Icon name="X" size={16}/></button></div>
+                                    <div className="max-h-60 overflow-y-auto space-y-2 pr-1 no-scrollbar">
+                                        {categories.map(cat => (
+                                            <div key={cat} className="flex items-center justify-between p-3 bg-gray-50 rounded-2xl group transition-all">
+                                                <span className="text-xs font-bold text-gray-600">{cat}</span>
+                                                {cat !== '转账' && cat !== '其他' && (
+                                                    <button onClick={() => deleteCategory(cat)} className="p-1.5 text-red-200 hover:text-red-500 transition-colors"><Icon name="Trash" size={14}/></button>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <div className="pt-4 border-t border-gray-100 space-y-3">
+                                        <p className="text-[10px] font-black text-gray-400 uppercase ml-1">新增分类</p>
+                                        <div className="flex gap-2">
+                                            <input type="text" className="flex-1 bg-gray-50 p-3 rounded-2xl text-xs font-bold outline-none border border-transparent focus:border-blue-100" placeholder="输入名称..." value={newCategoryName} onChange={e=>setNewCategoryName(e.target.value)} onKeyDown={e=>e.key==='Enter' && confirmAddCategory()} />
+                                            <button onClick={confirmAddCategory} className="bg-blue-600 text-white p-3 rounded-2xl active:scale-95 transition-transform"><Icon name="Plus" size={20}/></button>
+                                        </div>
+                                    </div>
+                                    <button onClick={() => setIsManagingCategories(false)} className="w-full bg-gray-900 text-white py-4 rounded-2xl font-black text-xs active:scale-95 transition-transform mt-4">完成并返回</button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                );
+            };
+
+            const headerTitle = {
+                'dashboard': '资产概览',
+                'history': '流水账单',
+                'transaction': '记一笔',
+                'sync': '数据同步',
+                'settings': '系统设置'
+            };
+
+            return (
+                <div className="max-w-md mx-auto min-h-screen flex flex-col px-6 relative">
+                    <header className="py-8 flex justify-between items-end">
+                        <div><p className="text-[10px] font-black text-blue-600 uppercase tracking-[0.2em] mb-1">Mono Ledger 💰</p><h2 className="text-2xl font-black">{headerTitle[activeTab]}</h2></div>
+                        {activeTab !== 'sync' && activeTab !== 'settings' && gitConfig.token && (
+                            <button onClick={handleDownloadToLocal} disabled={isSyncing} className={`p-2 bg-white rounded-full shadow-sm ${isSyncing ? 'text-blue-500' : 'text-gray-400'}`}>
+                                <Icon name="Refresh" size={18} className={isSyncing ? "animate-sync" : ""} />
+                            </button>
+                        )}
+                    </header>
+                    <main className="flex-1">
+                        {activeTab === 'dashboard' && <Dashboard />}
+                        {activeTab === 'history' && <HistoryView />}
+                        {activeTab === 'transaction' && <TransactionView handleAddTx={handleAddTx} accounts={accounts} categories={categories} setCategories={setCategories} />}
+                        {activeTab === 'sync' && <SyncView gitConfig={gitConfig} setGitConfig={setGitConfig} handleDownloadToLocal={handleDownloadToLocal} handleForcePush={handleForcePush} isSyncing={isSyncing} />}
+                        {activeTab === 'settings' && <SettingsView accounts={accounts} setAccounts={setAccounts} transactions={transactions} />}
+                    </main>
+
+                    <TransactionDetailModal t={detailTx} accounts={accounts} onClose={()=>setDetailTx(null)} onDelete={handleDeleteTx} onUpdateRemark={handleUpdateTxRemark} />
+                    
+                    {toast && <div className="fixed bottom-28 left-1/2 -translate-x-1/2 bg-gray-900 text-white px-6 py-3 rounded-2xl text-xs font-black shadow-2xl z-50 animate-bounce">{toast}</div>}
+                    
+                    <nav className="fixed bottom-8 left-1/2 -translate-x-1/2 w-[95%] max-w-[380px] bg-white/90 backdrop-blur-xl border border-white rounded-[32px] p-2 flex justify-around shadow-2xl items-center z-40">
+                        <button onClick={()=>setActiveTab('dashboard')} className={`flex-1 flex justify-center p-3 rounded-2xl transition-colors ${activeTab==='dashboard'?'text-blue-600':'text-gray-300'}`}>
+                            <Icon name="MoneyBag" size={24}/>
+                        </button>
+                        <button onClick={()=>setActiveTab('history')} className={`flex-1 flex justify-center p-3 rounded-2xl transition-colors ${activeTab==='history'?'text-blue-600':'text-gray-300'}`}>
+                            <Icon name="Notebook" size={24}/>
+                        </button>
+                        <button onClick={()=>setActiveTab('transaction')} className="bg-blue-600 text-white p-4 rounded-2xl shadow-xl -translate-y-4 active:scale-110 transition-transform flex justify-center mx-2">
+                            <Icon name="Plus" size={28}/>
+                        </button>
+                        <button onClick={()=>setActiveTab('sync')} className={`flex-1 flex justify-center p-3 rounded-2xl transition-colors ${activeTab==='sync'?'text-blue-600':'text-gray-300'}`}>
+                            <Icon name="Cloud" size={24}/>
+                        </button>
+                        <button onClick={()=>setActiveTab('settings')} className={`flex-1 flex justify-center p-3 rounded-2xl transition-colors ${activeTab==='settings'?'text-blue-600':'text-gray-300'}`}>
+                            <Icon name="Settings" size={24}/>
+                        </button>
+                    </nav>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
