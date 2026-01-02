@@ -109,4 +109,5 @@ const DEFAULT_GIT_CONFIG = {
 
 ------
 
-*如果你也喜欢这种 AI 驱动的开发方式，欢迎点个 Star 🌟！*
+*如果你也喜欢这种 AI 驱动的开发方式，欢迎点个 Star 🌟！
+你的好评对一个freshman开发者来说非常重要🥹*
