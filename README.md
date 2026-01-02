@@ -1,2 +1,73 @@
-# MonoLedger-Vibecoding
-一个由 Gemini Canvas 通过氛围编程 (Vibecoding) 诞生的极简、隐私优先、单文件个人记账应用。支持 GitHub API 自动同步，无需后端，纯浏览器运行。
+# MonoLedger 💰
+
+> **Vibecoding with Gemini Canvas** 🚀
+
+**MonoLedger** 是一个优雅、纯粹、隐私优先的个人资产管理工具。它是一个典型的 **Vibecoding** 产物——由人类提供灵感与“氛围”，由 **Gemini Canvas** 实时编码生成。
+
+它证明了：通过正确的 AI 交互，你不需要从零编写代码，也能拥有一个功能完整、UI 现代且完全属于自己的生产力工具。
+
+[功能预览](https://www.google.com/search?q=%23-核心功能) | [Vibecoding 宣言](https://www.google.com/search?q=%23-关于-vibecoding) | [快速开始](https://www.google.com/search?q=%23-如何使用) | [技术栈](https://www.google.com/search?q=%23-技术栈)
+
+------
+
+## 🎨 关于 Vibecoding
+
+本项目并非由传统的人工一行行敲出，而是利用 **Gemini Canvas** 进行氛围编程（Vibecoding）的结果：
+
+- **零手动编码**：所有逻辑、UI 组件及样式均由 Gemini 生成。
+- **即时演进**：通过简单的语言描述需求，应用在几分钟内从一个想法演变成一个功能完备的账单系统。
+- **以人为本**：开发者（我）的角色是“产品经理”和“创意指导”，负责调优功能逻辑和视觉审美。
+
+------
+
+## ✨ 核心功能
+
+- **📊 资产大盘**：基于 **Recharts** 的环形图与柱状图，直观展现收支比例与账户分布。
+- **💸 智能账目**：
+  - 支持支出、收入、以及账户间互转。
+  - **小收益模式**：专为懒人设计，只需输入当前余额，系统自动计算并记录利息/收益。
+- **☁️ GitHub 云同步**：彻底摆脱后端服务器。利用 GitHub API 将私有仓库作为数据库，实现多端同步与版本备份。
+- **🏦 灵活账户管理**：支持自定义账户（支付宝、微信、银行卡等）的初始化与动态管理。
+- **📥 数据出口**：支持一键导出 CSV 报表，数据所有权永远在你手中。
+- **📱 移动优先**：响应式设计，完美适配手机浏览器，开启 GitHub Pages 后即刻化身 Web App。
+
+------
+
+## 🚀 如何使用
+
+MonoLedger 采用 **单文件 (Single-File)** 架构，即开即用：
+
+1. **下载**：获取 `V1.0.0.html` 文件。
+2. **运行**：双击文件，用任意浏览器打开。
+3. **部署（可选）**：将文件上传至 GitHub 仓库并开启 **GitHub Pages**，即可通过自定义域名随时随地记账。
+
+------
+
+## ☁️ 云同步配置
+
+1. **准备**：在 GitHub 创建一个私有仓库（例如 `my-ledger-data`）。
+2. **Token**：在 [GitHub Settings](https://github.com/settings/tokens) 生成一个具有 `repo` 权限的 Personal Access Token。
+3. **配置**：打开应用 -> 进入 **数据同步** -> 填入用户名、仓库名和 Token。
+4. **同步**：
+   - 使用 **下载并覆盖本地** 初始化数据。
+   - 使用 **覆盖写入** 将本地新增账单推送到 GitHub。
+
+------
+
+## 🛠 技术栈
+
+- **Engine**: Gemini Canvas (The AI Coder)
+- **Library**: React (UMD), Recharts
+- **Style**: Tailwind CSS
+- **Icons**: Lucide-inspired SVG System
+- **Storage**: Browser LocalStorage + GitHub REST API
+
+------
+
+## 📝 开发者语录
+
+> “我只需要描述我想要的记账体验，Gemini 就负责把 HTML/JS/CSS 组织在一起。MonoLedger 是我个人 Vibecoding 旅程的第一站。”
+
+------
+
+*如果你也喜欢这种 AI 驱动的开发方式，欢迎点个 Star 🌟！*
